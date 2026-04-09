@@ -1,0 +1,95 @@
+.dashboard-overview {
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    border-radius: 20px;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    color: var(--text-main);
+}
+
+.metrics-card {
+    background: rgba(255, 255, 255, 0.5);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.metric-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.metric-header h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.badge {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.metric-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.metric-box {
+    display: flex;
+    flex-direction: column;
+}
+
+.metric-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.metric-value {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.progress-bar-container {
+    height: 6px;
+    background: rgba(0,0,0,0.05);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 1s ease-in-out;
+}
+
+.trend-card .trend-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.chart-container {
+    height: 200px;
+    position: relative;
+}
