@@ -1,86 +1,168 @@
-import React, { useEffect, useState } from 'react';
-import { Doughnut, Bar } from 'react-chartjs-2';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement } from 'chart.js';
+import React, { useRef } from 'react';
+import StatsCard from './StatsCard';
+import {
+  SalesTrendChart,
+  TopProductsChart,
+  ExpenseDonutChart,
+  YearlyProfitChart,
+} from './Charts';
 import './Dashboard.css';
 
-ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement);
+const Dashboard = ({ metrics, settings }) => {
+  const dashboardRef = useRef(null);
 
-const Dashboard = ({ metrics }) => {
-    // We will simulate some chart data since the backend gives us raw totals.
-    // In a production app, the backend would supply array data for these charts.
-    const doughnutData = {
-        labels: ['Electronics', 'Accessories', 'Office'],
-        datasets: [
-            {
-                data: [55, 30, 15],
-                backgroundColor: ['#a855f7', '#3b82f6', '#84cc16'],
-                borderWidth: 0,
-            },
-        ],
-    };
+  // Dynamic Formatter based on settings
+  const currency = settings?.currency || 'INR';
+  const locales = {
+    'INR': 'en-IN',
+    'USD': 'en-US',
+    'EUR': 'de-DE'
+  };
+  
+  const formatter = new Intl.NumberFormat(locales[currency] || 'en-US', {
+    style: 'currency',
+    currency: currency,
+    maximumFractionDigits: 0
+  });
 
-    return (
-        <div className="dashboard-overview glass-panel animate-fade-in">
-            <h2 className="section-title">Business Overview</h2>
-            
-            <div className="metrics-card">
-                <div className="metric-header">
-                    <h3>Financials</h3>
-                    <span className="badge">Auto-updated</span>
-                </div>
-                
-                <div className="metric-grid">
-                    <div className="metric-box">
-                        <span className="metric-label">Total Sales</span>
-                        <div className="metric-value">
-                            ${metrics?.['Total Sales'] ? metrics['Total Sales'].toLocaleString() : '0'}
-                        </div>
-                        <div className="progress-bar-container">
-                            <div className="progress-bar" style={{width: '75%', background: '#84cc16'}}></div>
-                        </div>
-                    </div>
-                    
-                    <div className="metric-box">
-                        <span className="metric-label">Total Profit</span>
-                        <div className="metric-value">
-                            ${metrics?.['Total Profit'] ? metrics['Total Profit'].toLocaleString() : '0'}
-                        </div>
-                        <div className="progress-bar-container">
-                            <div className="progress-bar" style={{width: '60%', background: '#3b82f6'}}></div>
-                        </div>
-                    </div>
-                    
-                    <div className="metric-box">
-                        <span className="metric-label">Total Orders</span>
-                        <div className="metric-value">
-                            {metrics?.['Total Orders'] || '0'}
-                        </div>
-                        <div className="progress-bar-container">
-                            <div className="progress-bar" style={{width: '90%', background: '#a855f7'}}></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+  const fmt = (n) => n != null ? formatter.format(n) : formatter.format(0);
 
-            <div className="metrics-card trend-card">
-                 <div className="metric-header">
-                    <h3>Recent Trend</h3>
-                </div>
-                <div className="trend-text">
-                    {metrics?.['Recent Trend'] || 'Calculating...'}
-                </div>
-            </div>
+  /* KPI values – use real data if backend supplies it, else tasteful defaults */
+  const totalRevenue  = metrics?.['Total Sales']  ?? 964000;
+  const totalExpenses = metrics?.['Total Expenses'] ?? 412000;
+  const netProfit     = metrics?.['Total Profit']  ?? (totalRevenue - totalExpenses);
+  const netMargin     = metrics?.['Net Margin']    ?? ((netProfit / totalRevenue) * 100).toFixed(1);
 
-            <div className="metrics-card chart-card">
-                <div className="metric-header">
-                    <h3>Category Distribution</h3>
-                </div>
-                <div className="chart-container">
-                    <Doughnut data={doughnutData} options={{ maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }} />
-                </div>
-            </div>
+
+  /* ── CSV export ─────────────────────────────────────────────────────────── */
+  const handleExportCSV = () => {
+    const rows = [
+      ['Metric', 'Value'],
+      ['Total Revenue', totalRevenue],
+      ['Total Expenses', totalExpenses],
+      ['Net Profit', netProfit],
+      ['Net Margin (%)', netMargin],
+    ];
+    const csv = rows.map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'bizsense_dashboard.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /* ── PNG export via browser print ──────────────────────────────────────── */
+  const handleDownloadPNG = () => {
+    window.print();
+  };
+
+  return (
+    <div className="dashboard-root animate-fade-in" ref={dashboardRef}>
+
+      {/* ── Page header ─────────────────────────────────────────────────── */}
+      <div className="dash-header">
+        <div>
+          <h2 className="dash-title">Business Overview</h2>
+          <p className="dash-subtitle">Real-time BizSense AI analytics</p>
         </div>
-    );
+        <span className="live-badge">● Live</span>
+      </div>
+
+      {/* ── KPI Cards row ────────────────────────────────────────────────── */}
+      <div className="stats-row">
+        <StatsCard
+          title="Total Revenue"
+          value={fmt(totalRevenue)}
+          trend="up"
+          trendValue="12.4%"
+          color="green"
+          icon="💰"
+        />
+        <StatsCard
+          title="Total Expenses"
+          value={fmt(totalExpenses)}
+          trend="down"
+          trendValue="3.1%"
+          color="red"
+          icon="📉"
+        />
+        <StatsCard
+          title="Net Profit"
+          value={fmt(netProfit)}
+          trend="up"
+          trendValue="18.7%"
+          color="purple"
+          icon="📈"
+        />
+        <StatsCard
+          title="Net Margin"
+          value={`${netMargin}%`}
+          trend="up"
+          trendValue="2.3%"
+          color="blue"
+          icon="🎯"
+        />
+      </div>
+
+      {/* ── Charts grid ──────────────────────────────────────────────────── */}
+      <div className="charts-grid">
+
+        {/* Row 1 – Sales trend + Top products */}
+        <div className="chart-card chart-card--large">
+          <div className="chart-card__header">
+            <span className="chart-card__title">Sales Trends</span>
+            <span className="chart-card__badge">Monthly</span>
+          </div>
+          <SalesTrendChart />
+        </div>
+
+        <div className="chart-card">
+          <div className="chart-card__header">
+            <span className="chart-card__title">Top Products</span>
+            <span className="chart-card__badge">Top 5</span>
+          </div>
+          <TopProductsChart />
+        </div>
+
+        {/* Row 2 – Expense donut + Yearly profit */}
+        <div className="chart-card">
+          <div className="chart-card__header">
+            <span className="chart-card__title">Expense Categories</span>
+            <span className="chart-card__badge">Breakdown</span>
+          </div>
+          <ExpenseDonutChart />
+        </div>
+
+        <div className="chart-card chart-card--large">
+          <div className="chart-card__header">
+            <span className="chart-card__title">Yearly Profit</span>
+            <span className="chart-card__badge">2021 – 2025</span>
+          </div>
+          <YearlyProfitChart />
+        </div>
+
+      </div>
+
+      {/* ── Recent Trend text (if provided by backend) ───────────────────── */}
+      {metrics?.['Recent Trend'] && (
+        <div className="trend-banner">
+          <span className="trend-banner__icon">📊</span>
+          <span>{metrics['Recent Trend']}</span>
+        </div>
+      )}
+
+      {/* ── Export buttons ────────────────────────────────────────────────── */}
+      <div className="export-row">
+        <button className="export-btn export-btn--csv" onClick={handleExportCSV}>
+          <span>⬇</span> Export CSV
+        </button>
+        <button className="export-btn export-btn--png" onClick={handleDownloadPNG}>
+          <span>🖼</span> Download PNG
+        </button>
+      </div>
+
+    </div>
+  );
 };
 
 export default Dashboard;

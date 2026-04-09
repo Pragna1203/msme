@@ -5,7 +5,7 @@ import './ChatInterface.css';
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
-const ChatInterface = ({ token, setMetrics }) => {
+const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -19,6 +19,54 @@ const ChatInterface = ({ token, setMetrics }) => {
     useEffect(() => {
         scrollToBottom();
     }, [messages, isLoading]);
+
+    // Load chat when currentChatId changes
+    useEffect(() => {
+        if (currentChatId) {
+            loadChatHistory(currentChatId);
+        } else {
+            setMessages([]);
+        }
+    }, [currentChatId]);
+
+    const loadChatHistory = async (id) => {
+        try {
+            const response = await fetch(`http://localhost:5000/chat/${id}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setMessages(data.messages);
+            }
+        } catch (error) {
+            console.error("Failed to load chat", error);
+        }
+    };
+
+    const saveChat = async (updatedMessages, chatId) => {
+        try {
+            const body = {
+                messages: updatedMessages,
+                title: updatedMessages[0]?.content.substring(0, 40) + (updatedMessages[0]?.content.length > 40 ? '...' : '')
+            };
+            if (chatId) body.id = chatId;
+
+            const response = await fetch('http://localhost:5000/chat/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            if (response.ok && !chatId) {
+                setCurrentChatId(data.id);
+            }
+        } catch (error) {
+            console.error("Failed to save chat", error);
+        }
+    };
 
     useEffect(() => {
         if (recognition) {
@@ -57,7 +105,8 @@ const ChatInterface = ({ token, setMetrics }) => {
         if (!text.trim()) return;
         
         const userMessage = { role: 'user', content: text };
-        setMessages(prev => [...prev, userMessage]);
+        const newMessages = [...messages, userMessage];
+        setMessages(newMessages);
         setInput('');
         setIsLoading(true);
 
@@ -74,7 +123,13 @@ const ChatInterface = ({ token, setMetrics }) => {
             const data = await response.json();
             
             if (response.ok) {
-                setMessages(prev => [...prev, { role: 'ai', content: data.response }]);
+                const aiMessage = { role: 'ai', content: data.response };
+                const finalMessages = [...newMessages, aiMessage];
+                setMessages(finalMessages);
+                
+                // Save to history
+                saveChat(finalMessages, currentChatId);
+
                 if (data.logical_metrics) {
                     setMetrics(data.logical_metrics);
                 }
@@ -97,7 +152,7 @@ const ChatInterface = ({ token, setMetrics }) => {
             {messages.length === 0 ? (
                 <div className="welcome-screen">
                     <div className="floating-avatar">🤖 ✨</div>
-                    <h1 className="welcome-title">Welcome to MSME Agent!</h1>
+                    <h1 className="welcome-title">Welcome to BizSense AI!</h1>
                     <p className="welcome-subtitle">How can I help you grow today?</p>
                     
                     <div className="suggested-prompts">
@@ -138,7 +193,7 @@ const ChatInterface = ({ token, setMetrics }) => {
                 <input 
                     type="text" 
                     className="chat-input"
-                    placeholder="Ask AI for MSME Business Insights..."
+                    placeholder="Ask AI for BizSense Business Insights..."
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleSend(input); }}
@@ -150,5 +205,6 @@ const ChatInterface = ({ token, setMetrics }) => {
         </div>
     );
 };
+
 
 export default ChatInterface;

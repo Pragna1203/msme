@@ -2,7 +2,7 @@ import React from 'react';
 import { LayoutDashboard, MessageSquare, BarChart2, Clock, Settings, LogOut } from 'lucide-react';
 import './Sidebar.css';
 
-const Sidebar = ({ onLogout, activeTab, setActiveTab }) => {
+const Sidebar = ({ onLogout, activeTab, setActiveTab, fullName }) => {
     const handleNav = (e, tab) => {
         e.preventDefault();
         setActiveTab(tab);
@@ -12,7 +12,7 @@ const Sidebar = ({ onLogout, activeTab, setActiveTab }) => {
         <div className="sidebar glass-panel">
             <div className="brand">
                 <div className="brand-logo">🤖</div>
-                <div className="brand-name">Agent</div>
+                <div className="brand-name">BizSense AI</div>
             </div>
 
             <nav className="nav-menu">
@@ -44,14 +44,15 @@ const Sidebar = ({ onLogout, activeTab, setActiveTab }) => {
             </nav>
 
             <div className="user-profile">
-                <div className="avatar">P</div>
+                <div className="avatar">{fullName ? fullName.charAt(0).toUpperCase() : 'U'}</div>
                 <div className="user-details">
-                    <span className="user-name">Premium</span>
+                    <span className="user-name">{fullName || 'User'}</span>
                     <span className="user-plan">Pro Plan</span>
                 </div>
             </div>
         </div>
     );
 };
+
 
 export default Sidebar;

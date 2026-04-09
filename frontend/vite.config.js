@@ -8,8 +8,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'MSME Business Agent',
-        short_name: 'MSME Agent',
+        name: 'BizSense AI',
+        short_name: 'BizSense',
         description: 'AI-powered business insights dashboard for small enterprises.',
         theme_color: '#ffffff',
         background_color: '#e5eef6',

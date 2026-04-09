@@ -4,7 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>BizSense AI</title>
+    <script>
+      (function() {
+        const settings = JSON.parse(localStorage.getItem('msme_settings') || '{}');
+        const theme = settings.theme || 'dark';
+        const font = settings.font || 'Inter';
+        const fontSize = settings.fontSize || 'medium';
+        
+        document.documentElement.className = `theme-${theme} font-${font.toLowerCase()} size-${fontSize}`;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

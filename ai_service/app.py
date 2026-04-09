@@ -138,7 +138,7 @@ Answer:"""
         completion = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "You are a helpful MSME business assistant."},
+                {"role": "system", "content": "You are a helpful BizSense business assistant."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.5,
