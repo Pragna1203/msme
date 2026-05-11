@@ -7,6 +7,7 @@ import {
   PieChart, Pie,
   Legend,
 } from 'recharts';
+import { convertFromINR, getCurrencySymbol, formatCurrency } from '../utils/currencyUtils';
 
 // ─── Shared colour palette ───────────────────────────────────────────────────
 const PURPLE = '#a855f7';
@@ -63,14 +64,15 @@ const TooltipStyle = {
   padding: '10px 14px',
 };
 
-const CustomTooltip = ({ active, payload, label, prefix = '₹' }) => {
+const CustomTooltip = ({ active, payload, label, currency = 'INR' }) => {
   if (!active || !payload?.length) return null;
+  const prefix = getCurrencySymbol(currency);
   return (
     <div style={TooltipStyle}>
       <p style={{ fontWeight: 600, marginBottom: 4 }}>{label}</p>
       {payload.map((p, i) => (
         <p key={i} style={{ color: p.color || '#a855f7' }}>
-          {p.name}: {prefix}{Number(p.value).toLocaleString('en-IN')}
+          {p.name}: {formatCurrency(convertFromINR(p.value, currency), currency)}
         </p>
       ))}
     </div>
@@ -91,43 +93,53 @@ const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent
 };
 
 // ─── A) Sales Trend Line Chart ────────────────────────────────────────────────
-export const SalesTrendChart = ({ data = salesTrendData }) => (
-  <ResponsiveContainer width="100%" height={220}>
-    <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-      <defs>
-        <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="5%"  stopColor={PURPLE} stopOpacity={0.35} />
-          <stop offset="95%" stopColor={PURPLE} stopOpacity={0}    />
-        </linearGradient>
-      </defs>
-      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-      <XAxis dataKey="month" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-      <YAxis tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-      <Tooltip content={<CustomTooltip />} />
-      <Area type="monotone" dataKey="sales" name="Sales" stroke={PURPLE} strokeWidth={2.5}
-        fill="url(#salesGrad)" dot={false} activeDot={{ r: 5, fill: PURPLE }} />
-    </AreaChart>
-  </ResponsiveContainer>
-);
+export const SalesTrendChart = ({ data = salesTrendData, currency = 'INR' }) => {
+  const symbol = getCurrencySymbol(currency);
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%"  stopColor={PURPLE} stopOpacity={0.35} />
+            <stop offset="95%" stopColor={PURPLE} stopOpacity={0}    />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+        <XAxis dataKey="month" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis 
+          tickFormatter={v => `${symbol}${(convertFromINR(v, currency)/1000).toFixed(0)}k`} 
+          tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} 
+        />
+        <Tooltip content={<CustomTooltip currency={currency} />} />
+        <Area type="monotone" dataKey="sales" name="Sales" stroke={PURPLE} strokeWidth={2.5}
+          fill="url(#salesGrad)" dot={false} activeDot={{ r: 5, fill: PURPLE }} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+};
 
 // ─── B) Top Products Horizontal Bar ──────────────────────────────────────────
 const BAR_COLORS = [GREEN, BLUE, PURPLE, ORANGE, PINK];
 
-export const TopProductsChart = ({ data = topProductsData }) => (
-  <ResponsiveContainer width="100%" height={220}>
-    <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
-      <XAxis type="number" tickFormatter={v => `₹${(v/1000).toFixed(0)}k`}
-        tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-      <YAxis type="category" dataKey="name" width={90}
-        tick={{ fill: '#cbd5e1', fontSize: 11 }} axisLine={false} tickLine={false} />
-      <Tooltip content={<CustomTooltip />} />
-      <Bar dataKey="sales" name="Sales" radius={[0, 8, 8, 0]} maxBarSize={18}>
-        {data.map((_, i) => <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
-      </Bar>
-    </BarChart>
-  </ResponsiveContainer>
-);
+export const TopProductsChart = ({ data = topProductsData, currency = 'INR' }) => {
+  const symbol = getCurrencySymbol(currency);
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+        <XAxis type="number" 
+          tickFormatter={v => `${symbol}${(convertFromINR(v, currency)/1000).toFixed(0)}k`}
+          tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis type="category" dataKey="name" width={90}
+          tick={{ fill: '#cbd5e1', fontSize: 11 }} axisLine={false} tickLine={false} />
+        <Tooltip content={<CustomTooltip currency={currency} />} />
+        <Bar dataKey="sales" name="Sales" radius={[0, 8, 8, 0]} maxBarSize={18}>
+          {data.map((_, i) => <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+};
 
 // ─── C) Expense Categories Donut ──────────────────────────────────────────────
 const PIE_COLORS = [BLUE, ORANGE, GREEN];
@@ -169,20 +181,26 @@ export const ExpenseDonutChart = ({ data = expenseCategoriesData }) => {
 };
 
 // ─── D) Yearly Profit Bar Chart ───────────────────────────────────────────────
-export const YearlyProfitChart = ({ data = yearlyProfitData }) => (
-  <ResponsiveContainer width="100%" height={220}>
-    <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-      <defs>
-        <linearGradient id="profitGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor={GREEN} stopOpacity={1}   />
-          <stop offset="100%" stopColor={GREEN} stopOpacity={0.4} />
-        </linearGradient>
-      </defs>
-      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-      <XAxis dataKey="year" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-      <YAxis tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-      <Tooltip content={<CustomTooltip />} />
-      <Bar dataKey="profit" name="Profit" fill="url(#profitGrad)" radius={[6, 6, 0, 0]} maxBarSize={40} />
-    </BarChart>
-  </ResponsiveContainer>
-);
+export const YearlyProfitChart = ({ data = yearlyProfitData, currency = 'INR' }) => {
+  const symbol = getCurrencySymbol(currency);
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id="profitGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor={GREEN} stopOpacity={1}   />
+            <stop offset="100%" stopColor={GREEN} stopOpacity={0.4} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+        <XAxis dataKey="year" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis 
+          tickFormatter={v => `${symbol}${(convertFromINR(v, currency)/1000).toFixed(0)}k`} 
+          tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} 
+        />
+        <Tooltip content={<CustomTooltip currency={currency} />} />
+        <Bar dataKey="profit" name="Profit" fill="url(#profitGrad)" radius={[6, 6, 0, 0]} maxBarSize={40} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+};

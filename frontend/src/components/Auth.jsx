@@ -10,6 +10,10 @@ const Auth = ({ setToken }) => {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
     
+    // Forgot Password states
+    const [forgotView, setForgotView] = useState(null); // null | 'forgot' | 'reset'
+    const [otp, setOtp] = useState('');
+    
     const emailInputRef = useRef(null);
 
     // Auto-focus the first input field on load or when switching modes
@@ -44,6 +48,81 @@ const Auth = ({ setToken }) => {
         setEmail('');
         setPassword('');
         setConfirmPassword('');
+    };
+
+    const handleForgotSubmit = async (e) => {
+        e.preventDefault();
+        if (!validateEmail(email)) {
+            setMessage({ type: 'error', text: 'Please enter a valid email' });
+            return;
+        }
+
+        setLoading(true);
+        setMessage({ type: '', text: '' });
+
+        try {
+            const res = await fetch(`http://localhost:5000/auth/forgot-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            const data = await res.json();
+            
+            if (!res.ok) {
+                setMessage({ type: 'error', text: data.error || 'Failed to send OTP' });
+                setLoading(false);
+                return;
+            }
+
+            setMessage({ type: 'success', text: 'OTP sent to your email successfully!' });
+            setForgotView('reset');
+        } catch (err) {
+            setMessage({ type: 'error', text: 'Server connection failed.' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleResetSubmit = async (e) => {
+        e.preventDefault();
+        if (password !== confirmPassword) {
+            setMessage({ type: 'error', text: 'Passwords do not match' });
+            return;
+        }
+
+        const passwordRegex = /^(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
+        if (!passwordRegex.test(password)) {
+             setMessage({ type: 'error', text: 'Password must be at least 8 characters, with 1 uppercase letter and 1 number.' });
+             return;
+        }
+
+        setLoading(true);
+        setMessage({ type: '', text: '' });
+
+        try {
+            const res = await fetch(`http://localhost:5000/auth/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, otp, newPassword: password })
+            });
+            const data = await res.json();
+            
+            if (!res.ok) {
+                setMessage({ type: 'error', text: data.error || 'Failed to reset password' });
+                setLoading(false);
+                return;
+            }
+
+            setMessage({ type: 'success', text: 'Password reset successful! Please log in.' });
+            setForgotView(null);
+            setPassword('');
+            setConfirmPassword('');
+            setOtp('');
+        } catch (err) {
+            setMessage({ type: 'error', text: 'Server connection failed.' });
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleSubmit = async (e) => {
@@ -92,6 +171,84 @@ const Auth = ({ setToken }) => {
         }
     };
 
+    if (forgotView) {
+        return (
+            <div className="auth-container">
+                <div className="auth-card animate-fade-in">
+                    <div className="auth-header">
+                        <div className="auth-robot-icon">🔐</div>
+                        <h1>{forgotView === 'forgot' ? 'Reset Password' : 'Create New Password'}</h1>
+                        <p>{forgotView === 'forgot' ? 'Enter your email to receive an OTP' : 'Enter the OTP and your new password'}</p>
+                    </div>
+
+                    {message.text && (
+                        <div className={`auth-message ${message.type}`}>
+                            {message.text}
+                        </div>
+                    )}
+
+                    <form onSubmit={forgotView === 'forgot' ? handleForgotSubmit : handleResetSubmit} className="auth-form">
+                        {forgotView === 'forgot' && (
+                            <div className="input-group">
+                                <input 
+                                    type="email" 
+                                    placeholder="Registered Email Address" 
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    required
+                                />
+                            </div>
+                        )}
+
+                        {forgotView === 'reset' && (
+                            <>
+                                <div className="input-group">
+                                    <input 
+                                        type="text" 
+                                        placeholder="Enter 6-digit OTP" 
+                                        value={otp}
+                                        onChange={e => setOtp(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                                <div className="input-group">
+                                    <input 
+                                        type="password" 
+                                        placeholder="New Password" 
+                                        value={password}
+                                        onChange={e => setPassword(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                                <div className="input-group">
+                                    <input 
+                                        type="password" 
+                                        placeholder="Confirm New Password" 
+                                        value={confirmPassword}
+                                        onChange={e => setConfirmPassword(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                            </>
+                        )}
+
+                        <button 
+                            type="submit" 
+                            className="auth-primary-btn"
+                            disabled={loading}
+                        >
+                            {loading ? 'Processing...' : (forgotView === 'forgot' ? 'Send Reset Link' : 'Reset Password')}
+                        </button>
+                    </form>
+
+                    <div className="auth-footer">
+                        <p>Remembered your password? <span onClick={() => { setForgotView(null); setMessage({ type: '', text: '' }); }}>Back to Login</span></p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="auth-container">
             <div className="auth-card animate-fade-in">
@@ -139,6 +296,16 @@ const Auth = ({ setToken }) => {
                             onChange={e => setPassword(e.target.value)}
                             required
                         />
+                        {isLogin && (
+                            <div style={{ textAlign: 'right', marginTop: '0.5rem' }}>
+                                <span 
+                                    style={{ fontSize: '0.85rem', color: 'var(--accent-color, #4f46e5)', cursor: 'pointer' }}
+                                    onClick={() => { setForgotView('forgot'); setMessage({ type: '', text: '' }); setPassword(''); }}
+                                >
+                                    Forgot Password?
+                                </span>
+                            </div>
+                        )}
                     </div>
 
                     {!isLogin && (

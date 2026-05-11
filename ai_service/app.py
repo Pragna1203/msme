@@ -3,10 +3,24 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Optional
 from groq import Groq
 import chromadb
 from sentence_transformers import SentenceTransformer
+import logging
+import time
+from functools import wraps
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("ai_service.log")
+    ]
+)
+logger = logging.getLogger("AI_Service")
 
 load_dotenv()
 
@@ -23,6 +37,29 @@ collection = chroma_client.get_or_create_collection(name="business_data")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY and GROQ_API_KEY != "YOUR_GROQ_API_KEY_HERE" else None
+
+if not groq_client:
+    logger.warning("GROQ_API_KEY not found or invalid. AI features will be mocked.")
+
+def retry_on_exception(retries=3, delay=1):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for i in range(retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    logger.error(f"Attempt {i+1} failed: {str(e)}")
+                    if "rate_limit" in str(e).lower() or "timeout" in str(e).lower() or "overloaded" in str(e).lower():
+                        time.sleep(delay * (2 ** i)) # Exponential backoff
+                    else:
+                        break
+            logger.error(f"All {retries} attempts failed. Raising exception.")
+            raise last_exception
+        return wrapper
+    return decorator
 
 # Pre-calculate globals
 SUMMARY_METRICS = {}
@@ -92,24 +129,37 @@ initialize_data()
 
 class QueryRequest(BaseModel):
     query: str
+    currency: Optional[str] = "INR"
+
+# --- Upload Query Request Model ---
+# Accepts both the user's query and the extracted text from an uploaded file
+class UploadQueryRequest(BaseModel):
+    query: str
+    file_content: str          # Raw text extracted from the uploaded file
+    file_name: Optional[str] = "uploaded_file"
+    currency: Optional[str] = "INR"
 
 @app.post("/process_query")
 async def process_query(request: QueryRequest):
     if not groq_client:
         return {"response": "Groq API key not configured. Mock response: Your total profit is high!"}
         
-    query = request.query
+    logger.info(f"Processing query: {query[:50]}...")
     
     # 1. Retrieve relevant data from RAG
-    query_emb = embedding_model.encode([query]).tolist()
-    results = collection.query(
-        query_embeddings=query_emb,
-        n_results=5
-    )
-    
-    retrieved_texts = results['documents'][0] if results['documents'] else []
-    context = "\n".join(retrieved_texts)
-    
+    try:
+        query_emb = embedding_model.encode([query]).tolist()
+        results = collection.query(
+            query_embeddings=query_emb,
+            n_results=5
+        )
+        retrieved_texts = results['documents'][0] if results['documents'] else []
+        context = "\n".join(retrieved_texts)
+        logger.info(f"Retrieved {len(retrieved_texts)} documents from ChromaDB")
+    except Exception as e:
+        logger.error(f"ChromaDB retrieval error: {str(e)}")
+        context = ""
+
     # 2. Add Pre-computed logical data
     logical_context = (
         f"Business Summaries:\n"
@@ -119,10 +169,13 @@ async def process_query(request: QueryRequest):
         f"Sales Trend: {SUMMARY_METRICS.get('Recent Trend', 'N/A')}\n"
     )
     
+    currency = request.currency or "INR"
+    
     # 3. Create prompt
     prompt = f"""You are a smart Business AI Agent for an MSME.
 Use the following context from their database and the pre-computed business numbers to answer the user request.
 Provide recommendations if asked. Keep replies concise and professional.
+ALL financial values in your response MUST be in {currency}.
 
 --- PRE-COMPUTED METRICS ---
 {logical_context}
@@ -134,8 +187,9 @@ Provide recommendations if asked. Keep replies concise and professional.
 User Query: {query}
 Answer:"""
 
-    try:
-        completion = groq_client.chat.completions.create(
+    @retry_on_exception(retries=3, delay=2)
+    def call_groq():
+        return groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": "You are a helpful BizSense business assistant."},
@@ -144,7 +198,96 @@ Answer:"""
             temperature=0.5,
             max_tokens=500
         )
+
+    try:
+        completion = call_groq()
         response_text = completion.choices[0].message.content
+        logger.info("Successfully generated AI response")
         return {"response": response_text, "logical_metrics": SUMMARY_METRICS}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Final error in process_query: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI Agent Error: {str(e)}")
+
+
+# --- Upload Query Endpoint ---
+# Processes a user query enriched with content extracted from an uploaded file.
+# All existing functionality (ChromaDB RAG, SUMMARY_METRICS) is preserved.
+@app.post("/upload_query")
+async def upload_query(request: UploadQueryRequest):
+    if not groq_client:
+        logger.warning("Groq client not initialized for upload_query.")
+        return {
+            "response": "Groq API key not configured. Upload received but cannot generate AI response.",
+            "logical_metrics": SUMMARY_METRICS
+        }
+
+    query = request.query
+    file_text = request.file_content
+    file_name = request.file_name
+    
+    logger.info(f"Processing upload query for file: {file_name}")
+
+    # 1. Retrieve relevant rows from the existing ChromaDB collection (same as /process_query)
+    try:
+        query_emb = embedding_model.encode([query]).tolist()
+        results = collection.query(query_embeddings=query_emb, n_results=5)
+        retrieved_texts = results['documents'][0] if results['documents'] else []
+        rag_context = "\n".join(retrieved_texts)
+        logger.info(f"Retrieved {len(retrieved_texts)} docs for upload query context")
+    except Exception as e:
+        logger.error(f"ChromaDB retrieval error in upload_query: {str(e)}")
+        rag_context = ""
+
+    # 2. Pre-computed business metrics (same as /process_query)
+    logical_context = (
+        f"Business Summaries:\n"
+        f"Total Sales: ${SUMMARY_METRICS.get('Total Sales', 0):.2f}\n"
+        f"Total Profit: ${SUMMARY_METRICS.get('Total Profit', 0):.2f}\n"
+        f"Total Orders: {SUMMARY_METRICS.get('Total Orders', 0)}\n"
+        f"Sales Trend: {SUMMARY_METRICS.get('Recent Trend', 'N/A')}\n"
+    )
+
+    # 3. Truncate uploaded file content to avoid exceeding token limits (~6000 chars)
+    truncated_file = file_text[:6000] + ("\n...[truncated]" if len(file_text) > 6000 else "")
+
+    currency = request.currency or "INR"
+
+    # 4. Build prompt with uploaded file content as additional context
+    prompt = f"""You are a smart Business AI Agent for an MSME.
+The user has uploaded a file named '{file_name}'. Analyse its content and answer the query.
+Also use the pre-computed business metrics and retrieved data rows as supporting context.
+ALL financial values in your response MUST be in {currency}.
+
+--- PRE-COMPUTED METRICS ---
+{logical_context}
+
+--- RETRIEVED DATA (from existing dataset) ---
+{rag_context}
+
+--- UPLOADED FILE CONTENT ---
+{truncated_file}
+
+---
+User Query: {query}
+Answer:"""
+
+    @retry_on_exception(retries=3, delay=2)
+    def call_groq_upload():
+        return groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "You are a helpful BizSense business assistant. Analyse uploaded files and provide actionable MSME insights."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.5,
+            max_tokens=600
+        )
+
+    try:
+        completion = call_groq_upload()
+        response_text = completion.choices[0].message.content
+        logger.info(f"Successfully generated AI response for file: {file_name}")
+        return {"response": response_text, "logical_metrics": SUMMARY_METRICS}
+    except Exception as e:
+        logger.error(f"Final error in upload_query: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI Agent Error (Upload): {str(e)}")

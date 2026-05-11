@@ -17,3 +17,6 @@ ai_service/.env
 # Local data files
 *.csv
 ecommerce_sales_data*.csv
+*.db
+*.log
+ai_service/*.log

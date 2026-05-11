@@ -9,6 +9,7 @@
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
   --accent: #3b82f6;
+  --accent-rgb: 59, 130, 246;
   --accent-hover: #2563eb;
   --green: #10b981;
   --yellow: #f59e0b;
@@ -26,6 +27,7 @@
   --text-main: #1e293b;
   --text-muted: #64748b;
   --accent: #2563eb;
+  --accent-rgb: 37, 99, 235;
   --accent-hover: #1d4ed8;
   --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.05);

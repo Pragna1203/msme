@@ -7,6 +7,9 @@ const dotenv = require('dotenv');
 
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
+const multer = require('multer');
 
 dotenv.config();
 
@@ -19,6 +22,50 @@ const SECRET = process.env.JWT_SECRET || 'supersecretmsmeagentkey123';
 
 const USERS_FILE = './users.json';
 const DB_FILE = path.join(__dirname, 'chat.db');
+
+// --- Helper: Fetch with Timeout & Retry ---
+async function fetchWithRetry(url, options = {}, retries = 3, backoff = 1000) {
+    const timeout = options.timeout || 30000; // 30s default timeout
+    delete options.timeout;
+
+    let lastResponse = null;
+    for (let i = 0; i < retries; i++) {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeout);
+        
+        try {
+            console.log(`[Proxy] Attempt ${i + 1} to ${url}...`);
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(id);
+            lastResponse = response;
+            
+            if (response.ok) return response;
+            
+            // If we get a server error, we might want to retry
+            if (response.status >= 500) {
+                console.warn(`[Proxy] Server error ${response.status}. Retrying...`);
+            } else {
+                return response; // Return 4xx errors without retry
+            }
+        } catch (err) {
+            clearTimeout(id);
+            if (err.name === 'AbortError') {
+                console.error(`[Proxy] Request to ${url} timed out after ${timeout}ms`);
+            } else {
+                console.error(`[Proxy] Request failed: ${err.message}`);
+            }
+            
+            if (i === retries - 1) throw err;
+        }
+        
+        // Wait before next retry
+        await new Promise(resolve => setTimeout(resolve, backoff * Math.pow(2, i)));
+    }
+    return lastResponse;
+}
 
 // Initialize SQLite Database
 const db = new sqlite3.Database(DB_FILE, (err) => {
@@ -46,6 +93,10 @@ const db = new sqlite3.Database(DB_FILE, (err) => {
                 settings TEXT
             )`, () => {
                 migrateUsersFromJson();
+                
+                // Add reset token columns if they don't exist
+                db.run(`ALTER TABLE users ADD COLUMN resetToken TEXT`, (err) => {});
+                db.run(`ALTER TABLE users ADD COLUMN resetTokenExpiry DATETIME`, (err) => {});
             });
         });
     }
@@ -74,6 +125,30 @@ function migrateUsersFromJson() {
         } catch (e) {
             console.error("Migration error:", e.message);
         }
+    }
+}
+
+// --- OTP Generation & Email Sending ---
+async function sendOTPEmail(email, otp) {
+    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+        const transporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            port: process.env.SMTP_PORT || 587,
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS
+            }
+        });
+        await transporter.sendMail({
+            from: process.env.SMTP_USER,
+            to: email,
+            subject: 'Password Reset OTP - BizSense AI',
+            text: `Your password reset OTP is: ${otp}. It is valid for 15 minutes.`
+        });
+    } else {
+        console.log(`\n\n=== PASSWORD RESET OTP FOR ${email} ===`);
+        console.log(`OTP: ${otp}`);
+        console.log(`(Configure SMTP in .env to send real emails)\n\n`);
     }
 }
 
@@ -123,6 +198,65 @@ app.post('/auth/login', async (req, res) => {
 
             const token = jwt.sign({ username: user.username }, SECRET, { expiresIn: '24h' });
             res.json({ token, message: 'Login successful' });
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/auth/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+        db.get(`SELECT * FROM users WHERE username = ?`, [email], async (err, user) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (!user) return res.status(404).json({ error: 'User with this email not found' });
+
+            const otp = crypto.randomInt(100000, 999999).toString();
+            const expiry = new Date(Date.now() + 15 * 60000).toISOString();
+
+            db.run(`UPDATE users SET resetToken = ?, resetTokenExpiry = ? WHERE username = ?`, [otp, expiry, email], async function(err) {
+                if (err) return res.status(500).json({ error: 'Failed to update reset token' });
+                
+                try {
+                    await sendOTPEmail(email, otp);
+                    res.json({ message: 'OTP sent successfully' });
+                } catch (emailErr) {
+                    console.error("Email sending error:", emailErr);
+                    res.status(500).json({ error: 'Failed to send email. Check SMTP settings.' });
+                }
+            });
+        });
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/auth/reset-password', async (req, res) => {
+    try {
+        const { email, otp, newPassword } = req.body;
+        if (!email || !otp || !newPassword) return res.status(400).json({ error: 'Missing required fields' });
+
+        const passwordRegex = /^(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
+        if (!passwordRegex.test(newPassword)) {
+             return res.status(400).json({ error: 'Password must be at least 8 characters, with 1 uppercase letter and 1 number.' });
+        }
+
+        db.get(`SELECT resetToken, resetTokenExpiry FROM users WHERE username = ?`, [email], async (err, user) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (!user || !user.resetToken) return res.status(400).json({ error: 'Invalid or expired OTP' });
+            
+            if (user.resetToken !== otp) return res.status(400).json({ error: 'Invalid OTP' });
+            
+            if (new Date() > new Date(user.resetTokenExpiry)) {
+                return res.status(400).json({ error: 'OTP has expired' });
+            }
+
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            db.run(`UPDATE users SET password = ?, resetToken = NULL, resetTokenExpiry = NULL WHERE username = ?`, 
+                [hashedPassword, email], function(err) {
+                if (err) return res.status(500).json({ error: 'Failed to reset password' });
+                res.json({ message: 'Password reset successfully' });
+            });
         });
     } catch (err) {
         res.status(500).json({ error: 'Internal server error' });
@@ -227,6 +361,125 @@ app.get('/chat/:id', authenticateToken, (req, res) => {
     );
 });
 
+// ─── File Upload Route ──────────────────────────────────────────────────────
+// Allowed MIME types and their friendly names
+const ALLOWED_TYPES = {
+    'text/csv': 'CSV',
+    'application/vnd.ms-excel': 'Excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
+    'application/pdf': 'PDF',
+    'text/plain': 'Text',
+};
+const MAX_FILE_SIZE_MB = 10;
+
+// Multer config: store in memory (no disk writes needed)
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage,
+    limits: { fileSize: MAX_FILE_SIZE_MB * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        if (ALLOWED_TYPES[file.mimetype]) {
+            cb(null, true);
+        } else {
+            cb(new Error(`Unsupported file type. Allowed: CSV, Excel, PDF, TXT.`));
+        }
+    }
+});
+
+/**
+ * POST /upload
+ * Accepts a multipart file + an optional query string.
+ * Extracts text from the file and sends it to the Python AI service.
+ */
+app.post('/upload', authenticateToken, (req, res) => {
+    // Use multer's single-file middleware inline so we can catch its errors
+    upload.single('file')(req, res, async (err) => {
+        // --- Multer / validation errors ---
+        if (err) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(413).json({ error: `File too large. Maximum allowed size is ${MAX_FILE_SIZE_MB}MB.` });
+            }
+            return res.status(400).json({ error: err.message });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded.' });
+        }
+
+        const { originalname, mimetype, buffer } = req.file;
+        const userQuery = (req.body.query || '').trim() ||
+            `Analyse this uploaded file (${originalname}) and provide key business insights.`;
+
+        // --- Extract text content from the buffer ---
+        let fileContent = '';
+        try {
+            if (mimetype === 'application/pdf') {
+                // For PDFs, extract raw text via a simple buffer-to-string approach.
+                // Full PDF parsing would need pdf-parse; we use a lightweight regex-based extraction.
+                const raw = buffer.toString('latin1');
+                const textChunks = raw.match(/BT[\s\S]*?ET/g) || [];
+                const extracted = textChunks
+                    .join(' ')
+                    .replace(/\/[A-Za-z]+\s+\d+\s+Tf/g, '')
+                    .replace(/Tj|TJ|Td|TD|Tm|T\*/g, ' ')
+                    .replace(/[^\x20-\x7E\n]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                fileContent = extracted || '[PDF content could not be extracted as plain text. Try a text-based PDF.]';
+            } else {
+                // CSV, TXT, Excel-as-text: decode as UTF-8
+                fileContent = buffer.toString('utf-8');
+            }
+        } catch (parseErr) {
+            return res.status(422).json({ error: 'Failed to read file content: ' + parseErr.message });
+        }
+
+        // --- Forward to Python AI service ---
+        try {
+            console.log(`[Upload] Forwarding file ${originalname} to AI service...`);
+            const pythonUploadUrl = (process.env.PYTHON_API_URL || 'http://127.0.0.1:8000/process_query')
+                .replace('/process_query', '/upload_query');
+
+            const aiResponse = await fetchWithRetry(pythonUploadUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    query: userQuery,
+                    file_content: fileContent,
+                    file_name: originalname,
+                    currency: req.body.currency || 'INR'
+                }),
+                timeout: 45000 // 45s for file processing
+            });
+
+            if (!aiResponse || !aiResponse.ok) {
+                let detail = 'AI service error during file processing.';
+                try { 
+                    if (aiResponse) {
+                        const errorData = await aiResponse.json();
+                        detail = errorData.detail || errorData.error || detail;
+                    } else {
+                        detail = 'No response from AI service after multiple attempts.';
+                    }
+                } catch (_) {}
+                console.error(`[Upload] AI service returned error: ${detail}`);
+                return res.status(aiResponse?.status || 502).json({ error: detail });
+            }
+
+            const data = await aiResponse.json();
+            console.log(`[Upload] AI service responded successfully for ${originalname}`);
+            return res.json({
+                response: data.response,
+                logical_metrics: data.logical_metrics,
+                fileName: originalname
+            });
+        } catch (fetchErr) {
+            console.error('Upload proxy error:', fetchErr.message);
+            return res.status(504).json({ error: 'AI Service Gateway Timeout: ' + fetchErr.message });
+        }
+    });
+});
+
 // --- Query Route ---
 app.post('/query', authenticateToken, async (req, res) => {
     try {
@@ -235,27 +488,44 @@ app.post('/query', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Query is required' });
         }
 
+        console.log(`[Query] Received query from ${req.user.username}: ${query.substring(0, 30)}...`);
+
         const pythonServiceUrl = process.env.PYTHON_API_URL || 'http://127.0.0.1:8000/process_query';
-        const response = await fetch(pythonServiceUrl, {
+        const response = await fetchWithRetry(pythonServiceUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query })
+            body: JSON.stringify({ 
+                query: query,
+                currency: req.body.currency || 'INR'
+            }),
+            timeout: 30000 // 30s timeout
         });
 
-        if (!response.ok) {
+        if (!response || !response.ok) {
             let detail = 'Python Service Error';
             try {
-                const errorData = await response.json();
-                detail = errorData.detail || detail;
-            } catch (e) {}
-            throw new Error(detail);
+                if (response) {
+                    const errorData = await response.json();
+                    detail = errorData.detail || errorData.error || detail;
+                } else {
+                    detail = 'AI service did not respond. It might be down or overloaded.';
+                }
+            } catch (e) {
+                detail = response ? `HTTP Error ${response.status}` : 'Request failed';
+            }
+            console.error(`[Query] AI service returned error: ${detail}`);
+            return res.status(response?.status || 502).json({ error: detail });
         }
 
         const data = await response.json();
+        console.log(`[Query] AI service responded successfully`);
         res.json(data);
     } catch (err) {
         console.error('Error proxying to AI service:', err.message);
-        res.status(500).json({ error: err.message || 'Error communicating with AI Service.' });
+        const isTimeout = err.name === 'AbortError' || err.message.includes('timeout');
+        res.status(isTimeout ? 504 : 500).json({ 
+            error: isTimeout ? 'AI Service Timeout' : (err.message || 'Error communicating with AI Service.') 
+        });
     }
 });
 

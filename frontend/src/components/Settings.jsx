@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Palette, Globe, Trash2, CheckCircle, AlertTriangle } from 'lucide-react';
 import './Settings.css';
 
-const Settings = ({ token, fullName, settings, updateUserSettings, setHistory }) => {
+const Settings = ({ token, fullName, settings, updateUserSettings, onClearHistory }) => {
     const [localName, setLocalName] = useState(fullName);
     const [localSettings, setLocalSettings] = useState(settings);
     const [showModal, setShowModal] = useState(false);
@@ -29,7 +29,7 @@ const Settings = ({ token, fullName, settings, updateUserSettings, setHistory })
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
-                setHistory([]);
+                onClearHistory();
                 setShowModal(false);
                 showToast('Chat history cleared!');
             }

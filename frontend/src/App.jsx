@@ -116,14 +116,14 @@ function App() {
         return (
           <>
             <Dashboard metrics={metrics} settings={settings} />
-            <ChatInterface token={token} setMetrics={setMetrics} currentChatId={currentChatId} setCurrentChatId={setCurrentChatId} />
+            <ChatInterface token={token} setMetrics={setMetrics} currentChatId={currentChatId} setCurrentChatId={setCurrentChatId} settings={settings} />
           </>
         );
       case 'assistant':
         return (
           <>
             <div style={{ padding: '0 24px' }}></div>
-            <ChatInterface token={token} setMetrics={setMetrics} currentChatId={currentChatId} setCurrentChatId={setCurrentChatId} />
+            <ChatInterface token={token} setMetrics={setMetrics} currentChatId={currentChatId} setCurrentChatId={setCurrentChatId} settings={settings} />
           </>
         );
       case 'analytics':
@@ -165,7 +165,10 @@ function App() {
             fullName={fullName} 
             settings={settings} 
             updateUserSettings={updateUserSettings}
-            setHistory={setHistory}
+            onClearHistory={() => {
+              setHistory([]);
+              setCurrentChatId(null);
+            }}
           />
         );
       default:

@@ -5,13 +5,17 @@ import './ChatInterface.css';
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
-const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) => {
+const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId, settings }) => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [isListening, setIsListening] = useState(false);
     const messagesEndRef = useRef(null);
+    const fileInputRef = useRef(null);
+    const [isDragging, setIsDragging] = useState(false);
 
+    const currency = settings?.currency || 'INR';
+    
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
@@ -104,6 +108,7 @@ const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) =
     const handleSend = async (text) => {
         if (!text.trim()) return;
         
+        console.log(`[Chat] Sending query: ${text.substring(0, 30)}...`);
         const userMessage = { role: 'user', content: text };
         const newMessages = [...messages, userMessage];
         setMessages(newMessages);
@@ -117,13 +122,19 @@ const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) =
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ query: text })
+                body: JSON.stringify({ query: text, currency })
             });
             
-            const data = await response.json();
+            let data = null;
+            try {
+                data = await response.json();
+            } catch (pErr) {
+                console.error("[Chat] Failed to parse JSON response:", pErr);
+            }
             
-            if (response.ok) {
-                const aiMessage = { role: 'ai', content: data.response };
+            if (response && response.ok && data) {
+                console.log(`[Chat] Received response from AI`);
+                const aiMessage = { role: 'ai', content: data.response || "I'm sorry, I couldn't generate a proper response." };
                 const finalMessages = [...newMessages, aiMessage];
                 setMessages(finalMessages);
                 
@@ -134,13 +145,120 @@ const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) =
                     setMetrics(data.logical_metrics);
                 }
             } else {
-                setMessages(prev => [...prev, { role: 'ai', content: `Error: ${data.error || 'Server error'}` }]);
+                const errMsg = data?.error || (response ? `Server returned ${response.status}` : 'Unable to connect to service.');
+                console.error(`[Chat] Query failed:`, errMsg);
+                setMessages(prev => [...prev, { 
+                    role: 'ai', 
+                    content: `⚠️ Agent Error: ${errMsg}\n\nPlease try again in a moment.` 
+                }]);
             }
         } catch (error) {
-            setMessages(prev => [...prev, { role: 'ai', content: 'Connection failed.' }]);
+            console.error(`[Chat] Network error:`, error.message);
+            setMessages(prev => [...prev, { 
+                role: 'ai', 
+                content: '❌ Connection failed. Please check if the backend server is running and try again.' 
+            }]);
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleFileUpload = async (event) => {
+        const file = event.target.files?.[0] || event.dataTransfer?.files?.[0];
+        if (!file) return;
+
+        // Validation
+        const allowedTypes = [
+            'text/csv', 
+            'application/vnd.ms-excel', 
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/pdf',
+            'text/plain'
+        ];
+        
+        if (!allowedTypes.includes(file.mimetype) && !file.name.match(/\.(csv|xlsx|xls|pdf|txt)$/i)) {
+            alert('Unsupported file type. Please upload CSV, Excel, PDF, or Text files.');
+            return;
+        }
+
+        if (file.size > 10 * 1024 * 1024) {
+            alert('File too large. Maximum size is 10MB.');
+            return;
+        }
+
+        console.log(`[Chat] Uploading file: ${file.name}`);
+        const userMessage = { role: 'user', content: `📁 Uploaded file: ${file.name}` };
+        const newMessages = [...messages, userMessage];
+        setMessages(newMessages);
+        setIsLoading(true);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('query', `Analyze this uploaded file (${file.name}) and provide key business insights.`);
+        formData.append('currency', currency);
+
+        try {
+            const response = await fetch('http://localhost:5000/upload', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                body: formData
+            });
+
+            let data = null;
+            try {
+                data = await response.json();
+            } catch (pErr) {
+                console.error("[Chat] Failed to parse upload response:", pErr);
+            }
+
+            if (response && response.ok && data) {
+                console.log(`[Chat] File processed successfully`);
+                const aiMessage = { 
+                    role: 'ai', 
+                    content: data.response || "File uploaded and processed. How can I help you with it?" 
+                };
+                const finalMessages = [...newMessages, aiMessage];
+                setMessages(finalMessages);
+                saveChat(finalMessages, currentChatId);
+                
+                if (data.logical_metrics) {
+                    setMetrics(data.logical_metrics);
+                }
+            } else {
+                const errMsg = data?.error || (response ? `Upload failed (${response.status})` : 'Network error during upload');
+                console.error(`[Chat] Upload failed:`, errMsg);
+                setMessages(prev => [...prev, { 
+                    role: 'ai', 
+                    content: `❌ Upload Error: ${errMsg}` 
+                }]);
+            }
+        } catch (error) {
+            console.error(`[Chat] Network error during upload:`, error.message);
+            setMessages(prev => [...prev, { 
+                role: 'ai', 
+                content: '❌ Connection failed during file upload.' 
+            }]);
+        } finally {
+            setIsLoading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = () => {
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        handleFileUpload(e);
     };
 
     const handlePredefinedQuery = (query) => {
@@ -148,7 +266,12 @@ const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) =
     };
 
     return (
-        <div className="chat-interface glass-panel animate-fade-in">
+        <div 
+            className={`chat-interface glass-panel animate-fade-in ${isDragging ? 'dragging' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        >
             {messages.length === 0 ? (
                 <div className="welcome-screen">
                     <div className="floating-avatar">🤖 ✨</div>
@@ -187,7 +310,14 @@ const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) =
                 <button className="icon-btn" onClick={toggleListening} style={{ color: isListening ? 'var(--accent)' : '' }}>
                     <Mic size={20} />
                 </button>
-                <button className="icon-btn">
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    style={{ display: 'none' }} 
+                    onChange={handleFileUpload}
+                    accept=".csv,.xlsx,.xls,.pdf,.txt"
+                />
+                <button className="icon-btn" onClick={() => fileInputRef.current?.click()}>
                     <Paperclip size={20} />
                 </button>
                 <input 
@@ -202,6 +332,7 @@ const ChatInterface = ({ token, setMetrics, currentChatId, setCurrentChatId }) =
                     <Send size={18} />
                 </button>
             </div>
+            {isDragging && <div className="drag-overlay">Drop files to analyze with BizSense AI</div>}
         </div>
     );
 };

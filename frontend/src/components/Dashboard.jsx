@@ -7,31 +7,24 @@ import {
   YearlyProfitChart,
 } from './Charts';
 import './Dashboard.css';
+import { convertFromINR, formatCurrency, getCurrencySymbol } from '../utils/currencyUtils';
 
 const Dashboard = ({ metrics, settings }) => {
   const dashboardRef = useRef(null);
-
-  // Dynamic Formatter based on settings
   const currency = settings?.currency || 'INR';
-  const locales = {
-    'INR': 'en-IN',
-    'USD': 'en-US',
-    'EUR': 'de-DE'
-  };
-  
-  const formatter = new Intl.NumberFormat(locales[currency] || 'en-US', {
-    style: 'currency',
-    currency: currency,
-    maximumFractionDigits: 0
-  });
 
-  const fmt = (n) => n != null ? formatter.format(n) : formatter.format(0);
+  /* KPI values – use real data if backend supplies it, else tasteful defaults.
+     Assumed base is INR. */
+  const rawRevenue = metrics?.['Total Sales'] ?? 964000;
+  const rawExpenses = metrics?.['Total Expenses'] ?? 412000;
+  const rawProfit = metrics?.['Total Profit'] ?? (rawRevenue - rawExpenses);
 
-  /* KPI values – use real data if backend supplies it, else tasteful defaults */
-  const totalRevenue  = metrics?.['Total Sales']  ?? 964000;
-  const totalExpenses = metrics?.['Total Expenses'] ?? 412000;
-  const netProfit     = metrics?.['Total Profit']  ?? (totalRevenue - totalExpenses);
-  const netMargin     = metrics?.['Net Margin']    ?? ((netProfit / totalRevenue) * 100).toFixed(1);
+  const totalRevenue = convertFromINR(rawRevenue, currency);
+  const totalExpenses = convertFromINR(rawExpenses, currency);
+  const netProfit = convertFromINR(rawProfit, currency);
+  const netMargin = metrics?.['Net Margin'] ?? ((netProfit / totalRevenue) * 100).toFixed(1);
+
+  const fmt = (val) => formatCurrency(val, currency);
 
 
   /* ── CSV export ─────────────────────────────────────────────────────────── */
@@ -113,7 +106,7 @@ const Dashboard = ({ metrics, settings }) => {
             <span className="chart-card__title">Sales Trends</span>
             <span className="chart-card__badge">Monthly</span>
           </div>
-          <SalesTrendChart />
+          <SalesTrendChart currency={currency} />
         </div>
 
         <div className="chart-card">
@@ -121,7 +114,7 @@ const Dashboard = ({ metrics, settings }) => {
             <span className="chart-card__title">Top Products</span>
             <span className="chart-card__badge">Top 5</span>
           </div>
-          <TopProductsChart />
+          <TopProductsChart currency={currency} />
         </div>
 
         {/* Row 2 – Expense donut + Yearly profit */}
@@ -138,7 +131,7 @@ const Dashboard = ({ metrics, settings }) => {
             <span className="chart-card__title">Yearly Profit</span>
             <span className="chart-card__badge">2021 – 2025</span>
           </div>
-          <YearlyProfitChart />
+          <YearlyProfitChart currency={currency} />
         </div>
 
       </div>

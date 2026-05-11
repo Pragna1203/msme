@@ -47,7 +47,7 @@ const Sidebar = ({ onLogout, activeTab, setActiveTab, fullName }) => {
                 <div className="avatar">{fullName ? fullName.charAt(0).toUpperCase() : 'U'}</div>
                 <div className="user-details">
                     <span className="user-name">{fullName || 'User'}</span>
-                    <span className="user-plan">Pro Plan</span>
+                    <span className="user-plan"></span>
                 </div>
             </div>
         </div>
